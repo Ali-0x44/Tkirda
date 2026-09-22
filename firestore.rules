@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signedIn() { return request.auth != null; }
+    function inThread(t) { return signedIn() && request.auth.uid in t.split('_'); }
+
+    // Interim rules: identity + profile + real-time chats (PLAN §6).
+    // Voice/call collections stay locked until their phases ship full rules.
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create, update: if request.auth.uid == uid
+                            && !('privateKey' in request.resource.data);
+      allow delete: if false;
+    }
+    match /phones/{phone} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+    match /chats/{thread}/messages/{id} {
+      allow read: if inThread(thread);
+      allow create: if inThread(thread) && request.resource.data.user._id == request.auth.uid;
+      allow delete: if inThread(thread);
+      allow update: if false;
+    }
+    match /voice/{thread}/blobs/{id} {
+      allow read, write: if false;
+    }
+    match /encryption/{thread}/messages/{id} {
+      allow read: if inThread(thread);
+      allow create: if inThread(thread) && thread.split('_')[0] == request.auth.uid;
+      allow update, delete: if false;
+    }
+    match /receipts/{id} {
+      allow create: if signedIn() && request.resource.data.by == request.auth.uid;
+      allow read: if signedIn()
+                   && (request.auth.uid == resource.data.by
+                      || request.auth.uid == resource.data.for);
+      allow delete: if signedIn()
+                    && (request.auth.uid == resource.data.by
+                       || request.auth.uid == resource.data.for);
+      allow update: if false;
+    }
+    match /calls/{document=**} {
+      allow read, write: if false;
+    }
+    match /callOffers/{callId} {
+      allow read, create, update, delete: if signedIn();
+    }
+    match /callAnswers/{callId} {
+      allow read, create, update, delete: if signedIn();
+    }
+    match /callICE/{callId}/candidates/{candidateId} {
+      allow read, create, update, delete: if signedIn();
+    }
+    match /sessions/{id} {
+      allow read: if signedIn()
+                   && (resource.data.initiatorId == request.auth.uid
+                      || resource.data.peerId == request.auth.uid);
+      allow create: if signedIn()
+                    && request.resource.data.kind == 'data'
+                    && request.resource.data.initiatorId == request.auth.uid
+                    && request.resource.data.status == 'pending';
+      allow update: if signedIn()
+                    && (request.resource.data.initiatorId == request.auth.uid
+                       || request.resource.data.peerId == request.auth.uid);
+      allow delete: if false;
+    }
+    match /presence/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+  }
+}
